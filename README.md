@@ -47,7 +47,7 @@ You need 64-bit Windows 10 or 11. The .NET Framework 4.x it runs on is already p
 ### Option A: build from source (recommended)
 
 ```powershell
-git clone https://github.com/<you>/CopilotToRCtrl.git
+git clone https://github.com/SirVosterzo/CopilotToRCtrl.git
 cd CopilotToRCtrl
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
