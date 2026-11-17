@@ -1,49 +1,50 @@
 # CopilotToRCtrl
 
-Turn the **Copilot key** on Windows laptops back into a **Right Ctrl** key.
+Make the Copilot key on Windows laptops work as Right Ctrl again.
 
-Many recent laptops (e.g. ASUS ROG Zephyrus G14) replaced Right Ctrl with a Copilot key. Windows only lets you
-point that key at an app — it can't make it behave like a modifier. CopilotToRCtrl fixes that: hold the Copilot
-key and it acts exactly like Right Ctrl (Ctrl+C, Ctrl+Click, Ctrl+Shift+Esc, auto-repeat, …).
+A lot of recent laptops, my ASUS ROG Zephyrus G14 included, swapped Right Ctrl for a Copilot key. Windows lets you
+point that key at an app, but it won't let you turn it into a modifier. With CopilotToRCtrl running, holding the
+Copilot key is the same as holding Right Ctrl, so Ctrl+C, Ctrl+Click and Ctrl+Shift+Esc all work, and it repeats
+when held.
 
-- Tiny, single-file C# program (~250 lines) you can read in a few minutes
-- Built with the C# compiler that ships with Windows — no SDK, no downloads, no dependencies
-- No network access, no registry changes, no telemetry, no child processes
-- Runs at logon with elevated rights so it also works in admin windows
+It's one C# file of about 250 lines, short enough to read before you run it. It compiles with the C# compiler that
+ships with Windows, so there's nothing to install first. It doesn't touch the network or the registry, doesn't
+collect anything, and doesn't start other programs. It runs elevated at logon, which is what lets it work in admin
+windows too.
 
-## Why not a registry Scancode Map / PowerToys?
+## Why not a registry Scancode Map or PowerToys?
 
-The Copilot key doesn't send a single key. It sends a chord:
+The Copilot key doesn't send one key. It sends a chord:
 
 ```
 press:    LWin ↓   LShift ↓   F23 ↓
 release:  F23 ↑    LShift ↑   LWin ↑
 ```
 
-Remapping F23 at the scancode level still leaves Win+Shift held, so you get Win+Shift+Ctrl instead of Ctrl.
-Shortcut-remapping tools generally can't hold the result as a modifier either.
+If you remap F23 with a Scancode Map, Win and Shift are still held, so you get Win+Shift+Ctrl instead of Ctrl.
+Shortcut remappers like PowerToys usually can't keep the result held down as a modifier either.
 
 ## How it works
 
-A low-level keyboard hook (`WH_KEYBOARD_LL`) watches for that chord:
+CopilotToRCtrl installs a low-level keyboard hook (`WH_KEYBOARD_LL`) and watches for that chord:
 
-1. **LWin ↓** is held back for up to 100 ms.
-2. If **LShift ↓** and then **F23 ↓** follow, the chord is swallowed and **Right Ctrl ↓** is injected.
-3. **F23 ↑** injects **Right Ctrl ↑**; the trailing LShift ↑ / LWin ↑ are swallowed.
-4. If anything else happens (you pressed the real Win key, Win+E, Win+Shift+S, …), the held keys are replayed
-   in their original order, so normal Windows shortcuts keep working.
+1. When LWin goes down, it holds the key back for up to 100 ms.
+2. If LShift and then F23 follow, it swallows all three and sends Right Ctrl down instead.
+3. When F23 comes back up, it sends Right Ctrl up and swallows the LShift and LWin releases that follow.
+4. If something else arrives first (you pressed the real Win key, or Win+E, or Win+Shift+S), it replays the held
+   keys in their original order and your shortcuts work as usual.
 
-Extra details:
+Your real Win and Shift keys still work while you hold the Copilot key, so Ctrl+Shift+Esc and Ctrl+Win+← are fine.
 
-- Your real Win/Shift keys still work while the Copilot key is held (Ctrl+Shift+Esc, Ctrl+Win+←).
-- Input is injected from the message loop, never inside the hook callback, to avoid hook timeouts.
-- The hook is re-installed every 5 seconds, because Windows silently drops low-level hooks that ever time out.
+Ctrl is sent from the message loop rather than from inside the hook callback. That keeps the callback fast enough
+that Windows doesn't time it out. Windows quietly removes any low-level hook that has timed out even once, though,
+so the program re-installs its hook every 5 seconds to be safe.
 
 ## Install
 
-Requirements: Windows 10/11 x64 (the .NET Framework 4.x it uses is built into Windows).
+You need 64-bit Windows 10 or 11. The .NET Framework 4.x it runs on is already part of Windows.
 
-### Option A — build from source (recommended)
+### Option A: build from source (recommended)
 
 ```powershell
 git clone https://github.com/<you>/CopilotToRCtrl.git
@@ -52,26 +53,26 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-### Option B — release download
+### Option B: download a release
 
-Download the zip from [Releases](../../releases), check its SHA-256 against the value in the release notes,
-extract it, and run `install.ps1`. Release binaries are built by GitHub Actions directly from the tagged
-source — see [`.github/workflows/build.yml`](.github/workflows/build.yml).
+Download the zip from [Releases](../../releases) and compare its SHA-256 with the one in the release notes. Then
+extract it and run `install.ps1`. GitHub Actions builds each release straight from the tagged source. The workflow
+is in [`.github/workflows/build.yml`](.github/workflows/build.yml) if you want to check how.
 
 ### What `install.ps1` does
 
-It asks for admin once (UAC), then:
+It asks for admin rights once, through UAC. Then it copies `CopilotToRCtrl.exe` to
+`C:\Program Files\CopilotToRCtrl\`. Only admins can write there, so another program can't swap in its own exe and
+get it run elevated at your next logon.
 
-- copies `CopilotToRCtrl.exe` to `C:\Program Files\CopilotToRCtrl\` (admin-only writable, so the elevated task
-  can't be hijacked by swapping the exe);
-- registers a scheduled task **CopilotToRCtrl** that runs at your logon with highest privileges, keeps running on
-  battery, has no time limit and restarts on failure;
-- starts it right away.
+Next it registers a scheduled task called `CopilotToRCtrl`. The task starts at your logon with highest privileges,
+has no time limit, keeps running on battery and restarts if it crashes. The script starts it right away, so you
+don't have to log out.
 
-Running elevated is what makes the key work inside elevated windows (admin terminals, Task Manager, …); Windows
-blocks unelevated input hooks from affecting those.
+It needs to run elevated to work inside admin windows like an admin terminal or Task Manager. Windows doesn't let
+an unelevated keyboard hook affect those.
 
-Re-run `install.ps1` after rebuilding to update.
+After a rebuild, run `install.ps1` again to update.
 
 ## Uninstall
 
@@ -79,18 +80,20 @@ Re-run `install.ps1` after rebuilding to update.
 powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 ```
 
-Removes the scheduled task and `C:\Program Files\CopilotToRCtrl\`. Nothing else is left behind.
+This deletes the scheduled task and `C:\Program Files\CopilotToRCtrl\`. The program doesn't create anything else,
+so that's all of it.
 
 ## Troubleshooting
 
-Stop the installed copy (only one instance can run), then run it with logging:
+Only one copy can run at a time, so stop the installed one before starting it with logging:
 
 ```powershell
 Stop-Process -Name CopilotToRCtrl
 .\CopilotToRCtrl.exe --log
 ```
 
-Every key event and decision is appended to `%TEMP%\CopilotToRCtrl.log`. Pressing the Copilot key should log:
+It writes every key event, and what it did with it, to `%TEMP%\CopilotToRCtrl.log`. One press of the Copilot key
+should look like this:
 
 ```
 vk=5B sc=5B fl=01 down Idle->GotWin BLOCK
@@ -101,20 +104,25 @@ vk=A0 sc=2A fl=80 up   Releasing->Releasing BLOCK
 vk=5B sc=5B fl=81 up   Releasing->Idle BLOCK
 ```
 
-If your keyboard sends something different, please open an issue with your log and laptop model.
-Afterwards, start the normal instance again with `Start-ScheduledTask CopilotToRCtrl`.
+If your keyboard sends something different, open an issue with the log and your laptop model. When you're done,
+stop the logging copy and start the normal one again:
+
+```powershell
+Stop-Process -Name CopilotToRCtrl
+Start-ScheduledTask CopilotToRCtrl
+```
 
 ## Known limitations
 
-- **Copilot+Alt+Del** won't open the security screen — Windows ignores injected Ctrl+Alt+Del by design.
-- Doesn't act on the secure desktop (UAC prompts, lock screen).
-- Real Win key presses are delayed by up to 100 ms before being passed through (not noticeable in practice).
-- Tested on an ASUS ROG Zephyrus G14. Other laptops that use the standard Copilot chord should work too.
+- Copilot+Alt+Del won't open the security screen. Windows deliberately ignores Ctrl+Alt+Del when software sends it.
+- It doesn't work on the secure desktop, meaning UAC prompts and the lock screen.
+- A real Win key press can wait up to 100 ms before it gets through. I haven't noticed it.
+- I've only tested it on an ASUS ROG Zephyrus G14. Other laptops whose Copilot key sends the same chord should work.
 
 ## Credits
 
-Inspired by [Dwedit/NoCopilotKey](https://github.com/Dwedit/NoCopilotKey), which pioneered the hook-based approach.
-CopilotToRCtrl is an independent, minimal reimplementation.
+The idea comes from [Dwedit/NoCopilotKey](https://github.com/Dwedit/NoCopilotKey), which does the same job with a
+keyboard hook. CopilotToRCtrl is a separate, much smaller program and doesn't share any of its code.
 
 ## License
 
