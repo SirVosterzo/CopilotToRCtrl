@@ -52,8 +52,8 @@ You need 64-bit Windows 10 or 11. The .NET Framework 4.x it runs on is already p
 
 That's it. The Copilot key works as Right Ctrl straight away and every time you sign in.
 
-The exe isn't code-signed, so Windows may show "Windows protected your PC" the first time. Click **More info**,
-then **Run anyway**. If you'd like to check the file first, compare its SHA-256 with the one in the release notes
+Windows may show "Windows protected your PC" the first time, especially for releases that aren't code-signed yet
+(the release notes say which). Click **More info**, then **Run anyway**. If you'd like to check the file first, compare its SHA-256 with the one in the release notes
 (`Get-FileHash .\CopilotToRCtrl.exe`). GitHub Actions builds each release straight from the tagged source. The
 workflow is in [`.github/workflows/build.yml`](.github/workflows/build.yml) if you want to check how.
 
@@ -130,6 +130,22 @@ Start-ScheduledTask CopilotToRCtrl
 - It doesn't work on the secure desktop, meaning UAC prompts and the lock screen.
 - A real Win key press can wait up to 100 ms before it gets through. I haven't noticed it.
 - I've only tested it on an ASUS ROG Zephyrus G14. Other laptops whose Copilot key sends the same chord should work.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [Claudio Lavacca](https://github.com/SirVosterzo)
+- Approvers: [Claudio Lavacca](https://github.com/SirVosterzo)
+
+Every release is built by GitHub Actions from the tagged source in this repository. It's signed only after I
+approve the signing request in SignPath.
+
+### Privacy
+
+This program will not transfer any information to other networked systems unless specifically requested by the
+user or the person installing or operating it.
 
 ## Credits
 

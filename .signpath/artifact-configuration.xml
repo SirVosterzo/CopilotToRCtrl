@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for CopilotToRCtrl.
+  SignPath reads this from the project settings, not from the repo: paste it into
+  Project > Artifact configurations and make it the default. It's kept here so the
+  configuration is reviewed with the source.
+
+  The GitHub artifact is a zip holding CopilotToRCtrl.exe. Only that exe gets an
+  Authenticode signature, and only if its product name and version match.
+  The workflow passes "version" from the release tag.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="CopilotToRCtrl.exe" product-name="CopilotToRCtrl" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

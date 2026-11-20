@@ -31,6 +31,7 @@ using Microsoft.Win32;
 [assembly: AssemblyCopyright("Copyright (c) 2026 Claudio Lavacca. MIT License.")]
 [assembly: AssemblyVersion(CopilotToRCtrl.Version + ".0")]
 [assembly: AssemblyFileVersion(CopilotToRCtrl.Version + ".0")]
+[assembly: AssemblyInformationalVersion(CopilotToRCtrl.Version)] // ProductVersion; release tag must be v + this
 
 static class CopilotToRCtrl
 {
