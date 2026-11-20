@@ -18,7 +18,7 @@ jobs:
       # Releases get signed once the SIGNPATH_API_TOKEN secret exists; until then they ship unsigned.
       SIGN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SIGNPATH_API_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build
         shell: pwsh
@@ -38,7 +38,7 @@ jobs:
       - name: Upload unsigned exe for signing
         id: unsigned
         if: env.SIGN == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CopilotToRCtrl-unsigned
           path: CopilotToRCtrl.exe
@@ -78,7 +78,7 @@ jobs:
           "CopilotToRCtrl.exe  SHA256: $exe" | Out-File dist/SHA256.txt -Encoding utf8
           Get-Content dist/SHA256.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CopilotToRCtrl
           path: dist/
