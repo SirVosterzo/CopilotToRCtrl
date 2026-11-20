@@ -7,8 +7,9 @@ point that key at an app, but it won't let you turn it into a modifier. With Cop
 Copilot key is the same as holding Right Ctrl, so Ctrl+C, Ctrl+Click and Ctrl+Shift+Esc all work, and it repeats
 when held.
 
-It's one C# file of about 250 lines, short enough to read before you run it. It compiles with the C# compiler that
-ships with Windows, so there's nothing to install first. It doesn't touch the network or the registry, doesn't
+It's a single exe. Double-click it to install, and double-click it again (or use Settings > Apps) to uninstall.
+The source is one C# file, short enough to read before you run it, and it compiles with the C# compiler that ships
+with Windows, so there's nothing to install first. The remapper doesn't touch the network or the registry, doesn't
 collect anything, and doesn't start other programs. It runs elevated at logon, which is what lets it work in admin
 windows too.
 
@@ -44,52 +45,63 @@ so the program re-installs its hook every 5 seconds to be safe.
 
 You need 64-bit Windows 10 or 11. The .NET Framework 4.x it runs on is already part of Windows.
 
-### Option A: build from source (recommended)
+### Option A: download it
+
+1. Download `CopilotToRCtrl.exe` from [Releases](../../releases/latest).
+2. Double-click it, say yes to the admin prompt, then click **Yes** to install.
+
+That's it. The Copilot key works as Right Ctrl straight away and every time you sign in.
+
+The exe isn't code-signed, so Windows may show "Windows protected your PC" the first time. Click **More info**,
+then **Run anyway**. If you'd like to check the file first, compare its SHA-256 with the one in the release notes
+(`Get-FileHash .\CopilotToRCtrl.exe`). GitHub Actions builds each release straight from the tagged source. The
+workflow is in [`.github/workflows/build.yml`](.github/workflows/build.yml) if you want to check how.
+
+### Option B: build from source
 
 ```powershell
 git clone https://github.com/SirVosterzo/CopilotToRCtrl.git
 cd CopilotToRCtrl
 powershell -ExecutionPolicy Bypass -File .\build.ps1
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+.\CopilotToRCtrl.exe
 ```
 
-### Option B: download a release
+### What installing does
 
-Download the zip from [Releases](../../releases) and compare its SHA-256 with the one in the release notes. Then
-extract it and run `install.ps1`. GitHub Actions builds each release straight from the tagged source. The workflow
-is in [`.github/workflows/build.yml`](.github/workflows/build.yml) if you want to check how.
-
-### What `install.ps1` does
-
-It asks for admin rights once, through UAC. Then it copies `CopilotToRCtrl.exe` to
-`C:\Program Files\CopilotToRCtrl\`. Only admins can write there, so another program can't swap in its own exe and
-get it run elevated at your next logon.
+It asks for admin rights once, through UAC. Then it copies itself to `C:\Program Files\CopilotToRCtrl\`. Only
+admins can write there, so another program can't swap in its own exe and get it run elevated at your next logon.
 
 Next it registers a scheduled task called `CopilotToRCtrl`. The task starts at your logon with highest privileges,
-has no time limit, keeps running on battery and restarts if it crashes. The script starts it right away, so you
-don't have to log out.
+has no time limit, keeps running on battery and restarts if it fails. It starts the task right away, so you don't
+have to log out. Finally it adds CopilotToRCtrl to Settings > Apps > Installed apps, so you can uninstall it from
+there like any other program.
 
 It needs to run elevated to work inside admin windows like an admin terminal or Task Manager. Windows doesn't let
 an unelevated keyboard hook affect those.
 
-After a rebuild, run `install.ps1` again to update.
+To update, double-click the new exe and pick **Yes** (update or reinstall).
 
 ## Uninstall
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
-```
+Either go to Settings > Apps > Installed apps > CopilotToRCtrl > Uninstall, or double-click `CopilotToRCtrl.exe`
+again and pick **No** (uninstall).
 
-This deletes the scheduled task and `C:\Program Files\CopilotToRCtrl\`. The program doesn't create anything else,
-so that's all of it.
+This deletes the scheduled task, the Installed apps entry and `C:\Program Files\CopilotToRCtrl\`. The program
+doesn't create anything else, so that's all of it.
+
+### Command line
+
+For scripted installs: `CopilotToRCtrl.exe --install --quiet` and `CopilotToRCtrl.exe --uninstall --quiet`. They
+show no dialogs and return 0 on success. Run them from an admin prompt to skip the UAC dialog too.
 
 ## Troubleshooting
 
-Only one copy can run at a time, so stop the installed one before starting it with logging:
+Only one copy can run at a time, so stop the installed one before starting it with logging. From an admin
+PowerShell:
 
 ```powershell
 Stop-Process -Name CopilotToRCtrl
-.\CopilotToRCtrl.exe --log
+& "C:\Program Files\CopilotToRCtrl\CopilotToRCtrl.exe" --log
 ```
 
 It writes every key event, and what it did with it, to `%TEMP%\CopilotToRCtrl.log`. One press of the Copilot key

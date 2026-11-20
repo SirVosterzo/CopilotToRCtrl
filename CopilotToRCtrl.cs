@@ -4,17 +4,38 @@
 // A low-level keyboard hook swallows that chord and injects Right Ctrl instead.
 // Real Win / Win+Shift presses are held for at most 100 ms and then replayed unchanged.
 //
-// No network, no registry, no child processes. Build with build.ps1.
-// Flags:  --log   write every key event and decision to %TEMP%\CopilotToRCtrl.log
+// One exe, two jobs. Build with build.ps1.
+//   (no args)     setup: install, update or uninstall, with a dialog (asks for admin once)
+//   --install     install without asking          --uninstall   uninstall without asking
+//   --quiet       with --install/--uninstall: no dialogs, result in the exit code
+//   --run         the remapper itself (what the scheduled task starts)
+//   --log         run the remapper and write every key event to %TEMP%\CopilotToRCtrl.log
+//
+// The remapper: no network, no registry, no child processes.
+// Setup: copies the exe to Program Files, registers a logon task and an entry in Settings > Apps.
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security;
+using System.Security.Principal;
 using System.Threading;
+using Microsoft.Win32;
+
+[assembly: AssemblyTitle("CopilotToRCtrl")]
+[assembly: AssemblyDescription("Makes the Copilot key work as Right Ctrl")]
+[assembly: AssemblyProduct("CopilotToRCtrl")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 Claudio Lavacca. MIT License.")]
+[assembly: AssemblyVersion(CopilotToRCtrl.Version + ".0")]
+[assembly: AssemblyFileVersion(CopilotToRCtrl.Version + ".0")]
 
 static class CopilotToRCtrl
 {
+    public const string Version = "1.1.0";
+
     // ---- Win32 -----------------------------------------------------------------
     const int WH_KEYBOARD_LL = 13;
     const uint LLKHF_EXTENDED = 0x01, LLKHF_INJECTED = 0x10, LLKHF_UP = 0x80;
@@ -83,12 +104,20 @@ static class CopilotToRCtrl
     [STAThread]
     static int Main(string[] args)
     {
+        var a = new List<string>(args);
+        bool withLog = a.Contains("--log");
+        if (a.Contains("--run") || withLog) return RunRemapper(withLog);
+        return Setup.Run(a);
+    }
+
+    static int RunRemapper(bool withLog)
+    {
         bool created;
         using (var mutex = new Mutex(true, "Local\\CopilotToRCtrl", out created))
         {
             if (!created) return 1;
 
-            if (Array.IndexOf(args, "--log") >= 0)
+            if (withLog)
             {
                 log = new StreamWriter(Path.Combine(Path.GetTempPath(), "CopilotToRCtrl.log"), true);
                 log.AutoFlush = true;
@@ -298,5 +327,281 @@ static class CopilotToRCtrl
     static void Log(string s)
     {
         if (log != null) log.WriteLine(DateTime.Now.ToString("HH:mm:ss.fff") + "  " + s);
+    }
+}
+
+// ---- Setup: install / update / uninstall --------------------------------------------
+static class Setup
+{
+    const string Name = "CopilotToRCtrl";
+    const string RepoUrl = "https://github.com/SirVosterzo/CopilotToRCtrl";
+    const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\" + Name;
+
+    static readonly string InstallDir =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Name);
+    static readonly string InstalledExe = Path.Combine(InstallDir, Name + ".exe");
+    static readonly string SelfExe = Assembly.GetExecutingAssembly().Location;
+
+    static bool quiet;
+    static int parentPid; // the unelevated copy that launched us; it waits for us, so don't kill it
+
+    const uint MB_YESNOCANCEL = 0x3, MB_YESNO = 0x4, MB_ICONERROR = 0x10, MB_ICONQUESTION = 0x20,
+               MB_ICONINFORMATION = 0x40, MB_SETFOREGROUND = 0x10000;
+    const int IDYES = 6, IDNO = 7, ERROR_CANCELLED = 1223;
+    const int TASK_CREATE_OR_UPDATE = 6, TASK_LOGON_INTERACTIVE_TOKEN = 3;
+    const uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x4;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int MessageBox(IntPtr hwnd, string text, string caption, uint type);
+    [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool MoveFileEx(string from, string to, uint flags);
+
+    const string InstalledMsg =
+        "CopilotToRCtrl is installed and running.\n\n" +
+        "The Copilot key now works as Right Ctrl, and it starts by itself every time you sign in.\n\n" +
+        "To remove it, go to Settings > Apps > Installed apps, or open this file again.";
+
+    public static int Run(List<string> a)
+    {
+        SetProcessDPIAware();
+        quiet = a.Contains("--quiet");
+        string mode = a.Contains("--install") ? "--install" : a.Contains("--uninstall") ? "--uninstall" : null;
+        string user = ArgValue(a, "--user");
+        int.TryParse(ArgValue(a, "--parent"), out parentPid);
+
+        try
+        {
+            if (!IsAdmin()) return Elevate(mode);
+            if (user == null) user = WindowsIdentity.GetCurrent().Name;
+
+            if (mode == "--install") { Install(user); Say(InstalledMsg); return 0; }
+            if (mode == "--uninstall") { Say(UninstalledMsg(Uninstall())); return 0; }
+
+            if (!IsInstalled())
+            {
+                if (Ask("Install CopilotToRCtrl?\n\n" +
+                        "The Copilot key will work as Right Ctrl, starting now and every time you sign in.",
+                        MB_YESNO) != IDYES) return 0;
+                Install(user);
+                Say(InstalledMsg);
+            }
+            else
+            {
+                int r = Ask("CopilotToRCtrl is already installed.\n\n" +
+                            "Yes:  update or reinstall it\nNo:  uninstall it\nCancel:  leave it as it is",
+                            MB_YESNOCANCEL);
+                if (r == IDYES) { Install(user); Say(InstalledMsg); }
+                else if (r == IDNO) Say(UninstalledMsg(Uninstall()));
+            }
+            return 0;
+        }
+        catch (Exception e)
+        {
+            if (!quiet)
+                MessageBox(IntPtr.Zero, "Something went wrong:\n\n" + e.Message, Name, MB_ICONERROR | MB_SETFOREGROUND);
+            return 1;
+        }
+    }
+
+    // ---- Install / uninstall ------------------------------------------------------
+    static void Install(string user)
+    {
+        dynamic folder = TaskFolder();
+        StopRunning(folder);
+
+        Directory.CreateDirectory(InstallDir); // inherits Program Files ACL: only admins can write
+        if (!SamePath(SelfExe, InstalledExe)) Retry(() => File.Copy(SelfExe, InstalledExe, true));
+
+        folder.RegisterTask(Name, TaskXml(user, InstalledExe), TASK_CREATE_OR_UPDATE, user, null,
+                            TASK_LOGON_INTERACTIVE_TOKEN, null);
+        WriteUninstallEntry();
+        folder.GetTask(Name).Run(null);
+    }
+
+    // Returns true when the folder can only be fully removed at the next restart.
+    static bool Uninstall()
+    {
+        dynamic folder = TaskFolder();
+        StopRunning(folder);
+        if (GetTask(folder) != null) folder.DeleteTask(Name, 0);
+        using (var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
+            hklm.DeleteSubKeyTree(UninstallKey, false);
+        return RemoveInstallDir();
+    }
+
+    static bool RemoveInstallDir()
+    {
+        if (!Directory.Exists(InstallDir)) return false;
+        if (IsUnder(SelfExe, InstallDir))
+        {
+            // We are the installed copy (uninstall from Settings > Apps). A running exe can't be
+            // deleted, but it can be moved: park it in the Windows temp folder, delete it at restart.
+            string parked = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp",
+                                         Name + "-" + Guid.NewGuid().ToString("N") + ".exe");
+            if (MoveFileEx(SelfExe, parked, 0))
+                MoveFileEx(parked, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+            else
+            {
+                foreach (string f in Directory.GetFiles(InstallDir))
+                    if (!SamePath(f, SelfExe)) File.Delete(f);
+                MoveFileEx(SelfExe, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+                MoveFileEx(InstallDir, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+                return true;
+            }
+        }
+        Retry(() => Directory.Delete(InstallDir, true));
+        return false;
+    }
+
+    static void StopRunning(dynamic folder)
+    {
+        dynamic task = GetTask(folder);
+        if (task != null) { try { task.Stop(0); } catch (Exception) { } } // not running is fine
+
+        int me = Process.GetCurrentProcess().Id;
+        foreach (Process p in Process.GetProcessesByName(Name))
+            using (p)
+            {
+                if (p.Id == me || p.Id == parentPid) continue;
+                try { p.Kill(); p.WaitForExit(3000); } catch (Exception) { } // already exited
+            }
+    }
+
+    static void WriteUninstallEntry()
+    {
+        using (var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
+        using (var k = hklm.CreateSubKey(UninstallKey))
+        {
+            string exe = "\"" + InstalledExe + "\"";
+            k.SetValue("DisplayName", Name);
+            k.SetValue("DisplayVersion", CopilotToRCtrl.Version);
+            k.SetValue("Publisher", "Claudio Lavacca");
+            k.SetValue("DisplayIcon", InstalledExe);
+            k.SetValue("InstallLocation", InstallDir);
+            k.SetValue("InstallDate", DateTime.Now.ToString("yyyyMMdd"));
+            k.SetValue("UninstallString", exe + " --uninstall");
+            k.SetValue("QuietUninstallString", exe + " --uninstall --quiet");
+            k.SetValue("URLInfoAbout", RepoUrl);
+            k.SetValue("NoModify", 1, RegistryValueKind.DWord);
+            k.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+            k.SetValue("EstimatedSize", (int)(new FileInfo(InstalledExe).Length / 1024) + 1, RegistryValueKind.DWord);
+        }
+    }
+
+    // ---- Task Scheduler (COM, late-bound) -------------------------------------------
+    static dynamic TaskFolder()
+    {
+        dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service"));
+        service.Connect();
+        return service.GetFolder("\\");
+    }
+
+    static dynamic GetTask(dynamic folder)
+    {
+        try { return folder.GetTask(Name); }
+        catch (FileNotFoundException) { return null; }
+    }
+
+    static bool IsInstalled() { return File.Exists(InstalledExe) || GetTask(TaskFolder()) != null; }
+
+    // At logon, elevated, no time limit, keeps running on battery, restarts if it fails.
+    static string TaskXml(string user, string exe)
+    {
+        string u = SecurityElement.Escape(user), e = SecurityElement.Escape(exe);
+        return
+"<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">" +
+"  <RegistrationInfo><Description>Makes the Copilot key work as Right Ctrl.</Description></RegistrationInfo>" +
+"  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + u + "</UserId></LogonTrigger></Triggers>" +
+"  <Principals><Principal id=\"Author\"><UserId>" + u + "</UserId>" +
+"    <LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>" +
+"  <Settings>" +
+"    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" +
+"    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" +
+"    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>" +
+"    <AllowHardTerminate>true</AllowHardTerminate>" +
+"    <StartWhenAvailable>false</StartWhenAvailable>" +
+"    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>" +
+"    <AllowStartOnDemand>true</AllowStartOnDemand>" +
+"    <Enabled>true</Enabled>" +
+"    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" +
+"    <Priority>4</Priority>" +
+"    <RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>" +
+"  </Settings>" +
+"  <Actions Context=\"Author\"><Exec><Command>" + e + "</Command><Arguments>--run</Arguments></Exec></Actions>" +
+"</Task>";
+    }
+
+    // ---- Helpers ----------------------------------------------------------------------
+    static bool IsAdmin()
+    {
+        return new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+    }
+
+    // Relaunch elevated (one UAC prompt), telling the copy who the real user is, and wait for it.
+    static int Elevate(string mode)
+    {
+        var args = new List<string>();
+        if (mode != null) args.Add(mode);
+        if (quiet) args.Add("--quiet");
+        args.Add("--user \"" + WindowsIdentity.GetCurrent().Name + "\"");
+        args.Add("--parent " + Process.GetCurrentProcess().Id);
+        var psi = new ProcessStartInfo(SelfExe, string.Join(" ", args));
+        psi.UseShellExecute = true;
+        psi.Verb = "runas";
+        try
+        {
+            using (Process p = Process.Start(psi)) { p.WaitForExit(); return p.ExitCode; }
+        }
+        catch (System.ComponentModel.Win32Exception e)
+        {
+            if (e.NativeErrorCode == ERROR_CANCELLED) return ERROR_CANCELLED; // UAC declined
+            throw;
+        }
+    }
+
+    static string UninstalledMsg(bool needsRestart)
+    {
+        return "CopilotToRCtrl is uninstalled. The Copilot key is back to normal." +
+               (needsRestart ? "\n\nIts folder in Program Files will be deleted the next time you restart." : "");
+    }
+
+    static int Ask(string text, uint buttons)
+    {
+        return MessageBox(IntPtr.Zero, text, Name, buttons | MB_ICONQUESTION | MB_SETFOREGROUND);
+    }
+
+    static void Say(string text)
+    {
+        if (!quiet) MessageBox(IntPtr.Zero, text, Name, MB_ICONINFORMATION | MB_SETFOREGROUND);
+    }
+
+    static string ArgValue(List<string> a, string name)
+    {
+        int i = a.IndexOf(name);
+        return i >= 0 && i + 1 < a.Count ? a[i + 1] : null;
+    }
+
+    static bool SamePath(string a, string b)
+    {
+        return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+    }
+
+    static bool IsUnder(string file, string dir)
+    {
+        return Path.GetFullPath(file).StartsWith(Path.GetFullPath(dir).TrimEnd('\\') + "\\",
+                                                 StringComparison.OrdinalIgnoreCase);
+    }
+
+    // A process we just killed can hold its exe for a moment.
+    static void Retry(Action act)
+    {
+        for (int i = 0; ; i++)
+        {
+            try { act(); return; }
+            catch (IOException) { if (i >= 9) throw; }
+            catch (UnauthorizedAccessException) { if (i >= 9) throw; }
+            Thread.Sleep(300);
+        }
     }
 }
