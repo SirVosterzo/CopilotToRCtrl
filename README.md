@@ -2,8 +2,9 @@
 
 Make the Copilot key on Windows laptops work as Right Ctrl again.
 
-A lot of recent laptops, my ASUS ROG Zephyrus G14 included, swapped Right Ctrl for a Copilot key. Windows lets you
-point that key at an app, but it won't let you turn it into a modifier. With CopilotToRCtrl running, holding the
+A lot of recent laptops, my ASUS ROG Zephyrus G14 included, swapped Right Ctrl for a Copilot key. Windows now has
+its own option to make it Right Ctrl, but Ctrl+Win and Ctrl+Shift shortcuts break with it (see
+[below](#why-not-windows-own-remap-powertoys-or-a-scancode-map)). With CopilotToRCtrl running, holding the
 Copilot key is the same as holding Right Ctrl, so Ctrl+C, Ctrl+Click and Ctrl+Shift+Esc all work, and it repeats
 when held.
 
@@ -13,7 +14,7 @@ with Windows, so there's nothing to install first. The remapper doesn't touch th
 collect anything, and doesn't start other programs. It runs elevated at logon, which is what lets it work in admin
 windows too.
 
-## Why not a registry Scancode Map or PowerToys?
+## Why not Windows' own remap, PowerToys or a Scancode Map?
 
 The Copilot key doesn't send one key. It sends a chord:
 
@@ -22,8 +23,25 @@ press:    LWin ↓   LShift ↓   F23 ↓
 release:  F23 ↑    LShift ↑   LWin ↑
 ```
 
-If you remap F23 with a Scancode Map, Win and Shift are still held, so you get Win+Shift+Ctrl instead of Ctrl.
-Shortcut remappers like PowerToys usually can't keep the result held down as a modifier either.
+That chord is what trips up the other options.
+
+**Windows 11's built-in remap.** Recent Windows 11 updates let you set the Copilot key to Right Ctrl. Microsoft
+itself notes that shortcuts with RCtrl+Win and RCtrl+Shift won't work as normal with it. The key is still sending
+Win and Shift, and Windows can't tell those apart from your real ones. CopilotToRCtrl keeps track of which Win and
+Shift presses are yours, so Copilot+Win+← and Copilot+Shift+Esc behave like RCtrl+Win+← and RCtrl+Shift+Esc.
+
+**PowerToys Keyboard Manager.** It offers two ways to do this, and neither is quite right:
+
+- Remap the key F23 to Right Ctrl. Win and Shift still get through, so you get Win+Shift+Ctrl instead of Ctrl.
+- Remap the shortcut Win+Shift+F23 to Right Ctrl. Shortcut remaps are designed to fire an action, so they're less
+  reliable at keeping Ctrl held. Ctrl+Click, Ctrl+drag and key repeat can be flaky, and your real Win and Shift run
+  into the same problem as the built-in remap. PowerToys also runs unelevated by default, so its remaps don't reach
+  admin windows unless you turn on "Always run as administrator".
+
+PowerToys does a lot more than this, with a settings UI and remaps per app. If you only need the Copilot key to be
+a real Ctrl, CopilotToRCtrl is one small exe that does only that.
+
+**A registry Scancode Map.** Same problem as remapping F23 in PowerToys: Win and Shift are still held.
 
 ## How it works
 
